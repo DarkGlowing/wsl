@@ -1,5 +1,7 @@
 FROM ubuntu:20.04
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 # Install necessary packages
 RUN apt-get update -y && \
 apt-get upgrade -y && \
