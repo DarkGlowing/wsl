@@ -1,124 +1,91 @@
 FROM ubuntu:20.04
 
-# For slim:
-#   --build-arg ADDITIONAL_APT_GET_OPTS=--no-install-recommends
-ARG ADDITIONAL_APT_GET_OPTS=""
+# Install necessary packages
+RUN apt-get update -y && \
+apt-get upgrade -y && \
+apt-get install -y shellinabox && \
+apt-get install -y xfce4 && \
+apt-get install -y xfce4-goodies && \
+apt-get install -y systemd && \
+apt-get install -y tightvncserver && \
+apt-get install -y novnc && \
+apt-get install -y net-tools && \
+apt-get install -y nano && \
+apt-get install -y vim && \
+apt-get install -y neovim && \
+apt-get install -y curl && \
+apt-get install -y wget && \
+apt-get install -y firefox && \
+apt-get install -y git && \
+apt-get install -y python3 && \
+apt-get install -y python3-pip && \
+apt-get clean && \
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN echo 'path-include=/usr/share/locale/ja/LC_MESSAGES/*.mo' > /etc/dpkg/dpkg.cfg.d/includes \
-    && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y $ADDITIONAL_APT_GET_OPTS \
-      dbus-x11 \
-      shellinabox \
-      systemd \
-      fonts-noto-cjk \
-      gosu \
-      ibus \
-      ibus-gtk \
-      ibus-gtk3 \
-      ibus-mozc \
-      im-config \
-      language-pack-ja \
-      language-pack-ja-base \
-      lxde \
-      net-tools \
-      novnc \
-      xfce4 \
-      xfce4-goodies \
-      sudo \
-      supervisor \
-      x11vnc \
-      xvfb \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*  /tmp/* /var/tmp/*
+# xfce fixes
+RUN update-alternatives --set x-terminal-emulator /usr/bin/xfce4-terminal.wrapper
 
-# Set locale
-RUN cp /usr/share/zoneinfo/Asia/Tokyo /etc/localtime \
-    && echo 'Asia/Tokyo' > /etc/timezone \
-    && locale-gen ja_JP.UTF-8 \
-    && echo 'LC_ALL=ja_JP.UTF-8' > /etc/default/locale \
-    && echo 'LANG=ja_JP.UTF-8' >> /etc/default/locale
-ENV LANG=ja_JP.UTF-8 \
-    LANGUAGE=ja_JP:ja \
-    LC_ALL=ja_JP.UTF-8
+# setup Chromium
+RUN git clone https://github.com/scheib/chromium-latest-linux.git /chromium
+RUN /chromium/update.sh
 
-# Set default vars
-ENV DEFAULT_USER=developer \
-    DEFAULT_PASSWD=vncpasswd
+# VNC and noVNC config
+ARG USER=root
+ENV USER=${USER}
 
-# Set sudoers for any user
-RUN echo "ALL ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/ALL
+ARG VNCPORT=5900
+ENV VNCPORT=${VNCPORT}
+EXPOSE ${VNCPORT}
 
-# Change permission so that non-root user can add users and groups
-RUN chmod u+s /usr/sbin/useradd \
-    && chmod u+s /usr/sbin/groupadd
+ARG NOVNCPORT=9090
+ENV NOVNCPORT=${NOVNCPORT}
+EXPOSE ${NOVNCPORT}
+
+ARG VNCPWD=vncrootpower
+ENV VNCPWD=${VNCPWD}
+
+ARG VNCDISPLAY=1920x1080
+ENV VNCDISPLAY=${VNCDISPLAY}
+
+ARG VNCDEPTH=16
+ENV VNCDEPTH=${VNCDEPTH}
+
+# setup VNC
+RUN mkdir -p /root/.vnc/
+RUN echo ${VNCPWD} | vncpasswd -f > /root/.vnc/passwd
+RUN chmod 600 /root/.vnc/passwd
+RUN echo "#!/bin/sh \n\
+xrdb $HOME/.Xresources \n\
+xsetroot -solid grey \n\
+#x-terminal-emulator -geometry 80x24+10+10 -ls -title "$VNCDESKTOP Desktop" & \n\
+#x-window-manager & \n\
+# Fix to make GNOME work \n\
+export XKL_XMODMAP_DISABLE=1 \n\
+/etc/X11/Xsession \n\
+startxfce4 & \n\
+" > /root/.vnc/xstartup
+RUN chmod +x /root/.vnc/xstartup
+
+# setup noVNC
+RUN openssl req -new -x509 -days 365 -nodes \
+  -subj "/C=US/ST=IL/L=Springfield/O=OpenSource/CN=localhost" \
+  -out /etc/ssl/certs/novnc_cert.pem -keyout /etc/ssl/private/novnc_key.pem \
+  > /dev/null 2>&1
+RUN cat /etc/ssl/certs/novnc_cert.pem /etc/ssl/private/novnc_key.pem \
+  > /etc/ssl/private/novnc_combined.pem
+RUN chmod 600 /etc/ssl/private/novnc_combined.pem
 
 RUN echo 'root:root' | chpasswd
-
-# Expose VNC and noVNC ports
+# Expose the web-based terminal port
 EXPOSE 4200
-EXPOSE 5900
-EXPOSE 80
 
-RUN install -o root -g root -m 0755 -d /var/run/dbus \
-    && sed -i 's|\[Session\]|&\npolkit/command=|' /etc/xdg/lxsession/LXDE/desktop.conf \
-    && ln -s /usr/share/lxde/wallpapers/lxde_green.jpg /etc/alternatives/desktop-background
-
-# Set supervisord conf
-RUN { \
-      echo '[supervisord]'; \
-      echo 'user=root'; \
-      echo 'nodaemon=true'; \
-      echo 'logfile=/var/log/supervisor/supervisord.log'; \
-      echo 'childlogdir=/var/log/supervisor'; \
-      echo '[program:dbus]'; \
-      echo 'priority=10'; \
-      echo 'command=/usr/bin/dbus-daemon --system --nofork --nopidfile'; \
-      echo '[program:lightdm]'; \
-      echo 'priority=20'; \
-      echo 'command=/usr/local/bin/start-lightdm.sh'; \
-      echo '[program:x11vnc]'; \
-      echo 'priority=30'; \
-      echo 'startretries=5'; \
-      echo 'command=/usr/bin/x11vnc -display :0 -auth /var/run/lightdm/root/:0 -rfbauth /etc/x11vnc.passwd -xkb -forever -shared -repeat -capslock'; \
-      echo '[program:novnc]'; \
-      echo 'priority=40'; \
-      echo 'user=${USER}'; \
-      echo 'command=/usr/share/novnc/utils/launch.sh --vnc localhost:5900 --listen 80'; \
-    } > /etc/supervisor/vnc.conf.template
-
-# Set scripts and configuration for lightdm and Xvfb
-RUN { \
-        # This script waits for D-Bus to be ready, then starts lightdm.
-        # If lightdm starts before D-Bus is active, the startup of lightdm may fail.
-        # Therefore, it is necessary to wait until D-Bus is ready before starting lightdm.
-        # This script was created to solve this problem.
-        echo '#!/bin/sh'; \
-        echo 'while true'; \
-        echo 'do'; \
-        echo '    busctl > /dev/null 2>&1 && break'; \
-        echo '    sleep 0.1'; \
-        echo 'done'; \
-        echo 'exec /usr/sbin/lightdm'; \
-    } > /usr/local/bin/start-lightdm.sh \
-    && chmod +x /usr/local/bin/start-lightdm.sh \
-    && { \
-        # This script starts Xvfb with the given resolution
-        echo '#!/bin/sh'; \
-        echo 'RESOLUTION="$1"'; \
-        echo 'exec /usr/bin/Xvfb :0 -screen 0 "$RESOLUTION" -nolisten tcp'; \
-    } > /usr/local/bin/start-Xvfb.sh \
-    && chmod +x /usr/local/bin/start-Xvfb.sh \
-    && { \
-        # This is a template for lightdm configuration
-        echo '[Seat:*]'; \
-        echo 'xserver-command=/usr/local/bin/start-Xvfb.sh "${RESOLUTION}"'; \
-        echo 'autologin-user=${USER}'; \
-        echo 'autologin-user-timeout=0'; \
-        echo 'autologin-session=LXDE'; \
-    } > /etc/lightdm/lightdm.conf.template
-
-# Copy entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-ENTRYPOINT ["docker-entrypoint.sh"]
+# Start shellinabox
 CMD ["/usr/bin/shellinaboxd", "-t", "-s", "/:LOGIN"]
+
+ENTRYPOINT [ "/bin/bash", "-c", " \
+  echo 'NoVNC Certificate Fingerprint:'; \
+  openssl x509 -in /etc/ssl/certs/novnc_cert.pem -noout -fingerprint -sha256; \
+  vncserver :0 -rfbport ${VNCPORT} -geometry $VNCDISPLAY -depth $VNCDEPTH -localhost; \
+  /usr/share/novnc/utils/launch.sh --listen $NOVNCPORT --vnc localhost:$VNCPORT \
+    --cert /etc/ssl/private/novnc_combined.pem \
+" ]
