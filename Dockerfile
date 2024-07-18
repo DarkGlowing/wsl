@@ -5,6 +5,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Install necessary packages
 RUN apt-get update -y && \
 apt-get upgrade -y && \
+apt-get dist-upgrade -y && \
+apt-get purge gnome -y && \
 apt-get install -y shellinabox && \
 apt-get install -y xfce4 && \
 apt-get install -y xfce4-goodies && \
