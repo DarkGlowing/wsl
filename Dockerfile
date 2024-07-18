@@ -22,6 +22,8 @@ RUN echo 'path-include=/usr/share/locale/ja/LC_MESSAGES/*.mo' > /etc/dpkg/dpkg.c
       lxde \
       net-tools \
       novnc \
+      xfce4 \
+      xfce4-goodies \
       sudo \
       supervisor \
       x11vnc \
